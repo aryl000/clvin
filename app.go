@@ -15,9 +15,10 @@ func main() {
 	r := gin.Default()
 
 	r.POST("/interviewee/save", interviewee.WriteData)
+	r.GET("/opsform/view", interviewee.ReadDataOps)
 	r.GET("/nonopsform/view", interviewee.ReadDataNon)
 	r.GET("/rejected/view", interviewee.ReadRejected)
-	r.GET("/opsform/view", interviewee.ReadDataOps)
+	r.POST("/form/update", interviewee.UpdateCandidate)
 	r.GET("/interviewee/email", interviewee.EmailCandidate)
 	r.POST("/nonopsform/filter", chart.Filter)
 	r.POST("/nonopsform/filterChart", chart.FilterChart)

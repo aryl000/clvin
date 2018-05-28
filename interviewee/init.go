@@ -2,6 +2,7 @@ package interviewee
 
 import (
 	"database/sql"
+	"database/sql/driver"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -9,11 +10,13 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/gosample/chart"
+	// "github.com/kunyit/src/utils"
 	_ "github.com/lib/pq" // _ "github.com/lib/pq"
 )
 
 type Candidate struct {
 	Fid               int       `json:"id"`
+	FPIC              int       `json:"pic"`
 	FfullName         string    `json:"fullName"`
 	FnickName         string    `json:"nickName"`
 	FphoneNumber      string    `json:"phoneNumber"`
@@ -35,6 +38,7 @@ type Candidate struct {
 	Fprogress         int       `json:"progress,omitempty"`
 	Fprog             string    `json:"statProgress,omitempty"`
 	Ftimestamp        time.Time `json:"timestamp"`
+	FupdatedDate      time.Time `json:"updatedDate"`
 }
 
 const (
@@ -44,6 +48,37 @@ const (
 	password = "newpassword"
 	dbname   = "hris"
 )
+
+// func GetTimestamp(t time.Time) Timestamps {
+// 	unix := UnixFromWIB(t)
+// 	formated := TKPDTime(t)
+// 	formatApp1 := t.Format("02 January 2006, 15:04")
+// 	formatApp2 := t.Format("02/01/2006")
+// 	formatApp3 := MonthReplace(t.Format("02 Jan 2006, 15:04 WIB"))
+// 	formatApp4 := DiffWithServerTime(t.In(location).Add(-7 * time.Hour))
+// 	formatApp1 = MonthReplace(formatApp1)
+// 	date := t.Format("2006-01-02")
+// 	original := t
+// 	formatPerl := t.Format("20060102150405")
+// 	return Timestamps{unix, formated, formatApp1, formatApp2, formatApp3, formatApp4, date, original, formatPerl}
+// }
+
+type NullTime struct {
+	Time  time.Time
+	Valid bool // Valid is true if Time is not NULL
+}
+
+func (nt *NullTime) Scan(value interface{}) error {
+	nt.Time, nt.Valid = value.(time.Time)
+	return nil
+}
+
+func (nt NullTime) Value() (driver.Value, error) {
+	if !nt.Valid {
+		return nil, nil
+	}
+	return nt.Time, nil
+}
 
 func WriteData(c *gin.Context) {
 	// fmt.Printf([]byte(r.Body))
@@ -107,6 +142,48 @@ func WriteData(c *gin.Context) {
 	// c.Writer.Write([]byte(nonops.FacquaintanceName))
 
 }
+
+func UpdateCandidate(c *gin.Context) {
+
+	c.Writer.Header().Set("Content-Type", "application/json")
+	c.Writer.Header().Set("Access-Control-Allow-Origin", c.Request.Header.Get("Origin"))
+	c.Writer.Header().Set("Access-Control-Allow-Credentials", "true")
+
+	var ops Candidate
+	err := c.BindJSON(&ops)
+	if err != nil {
+		fmt.Println("Error Binding JSON")
+		fmt.Println(err.Error())
+	}
+
+	psqlInfo := fmt.Sprintf("host=%s port=%d user=%s "+
+		"password=%s dbname=%s sslmode=disable",
+		host, port, user, password, dbname)
+	db, err := sql.Open("postgres", psqlInfo)
+	if err != nil {
+		panic(err)
+	}
+	defer db.Close()
+
+	err = db.Ping()
+	if err != nil {
+		panic(err)
+	}
+
+	// updateTime := time.Now().Format("02-01-2006 15:04:05")
+	fmt.Println("Successfully connected!")
+
+	sqlStatement := `UPDATE candidate SET progress = $1, updateddate = $3, pic = $4 WHERE id = $2`
+	_, err = db.Exec(sqlStatement, ops.Fprogress, ops.Fid, ops.FupdatedDate, ops.FPIC)
+	if err != nil {
+		panic(err)
+	}
+	//fmt.Printf("hello %s, you is %s, your email is %s \n", nonops.FfullName, nonops.FnickName, nonops.Femail)
+
+	// c.Writer.Write([]byte(nonops.FacquaintanceName))
+
+}
+
 func ReadDataNon(c *gin.Context) {
 	c.Writer.Header().Set("Content-Type", "application/json")
 	c.Writer.Header().Set("Access-Control-Allow-Origin", c.Request.Header.Get("Origin"))
@@ -144,7 +221,7 @@ func ReadDataNon(c *gin.Context) {
 	purpose, contactpersonid, positionapply,
 	jobinfo, acquaintance, scheduletime,
 	acquaintancename, relationship, referralName, status,
-	logtimestamps FROM candidate WHERE formtype = 'Non Operational Form' ` + result
+	logtimestamps, updatedDate FROM candidate WHERE formtype = 'Non Operational Form' ` + result
 
 	rows, err := db.Query(sqlStatement)
 	if err != nil {
@@ -154,15 +231,8 @@ func ReadDataNon(c *gin.Context) {
 	// println(rows)
 
 	var response []Candidate
-	var nickname sql.NullString
-	var phone sql.NullString
-	var school sql.NullString
-	var jobinfo sql.NullString
-	var acquaintanceName sql.NullString
-	var relationship sql.NullString
-	var referralName sql.NullString
-	var major sql.NullString
-	var GPA sql.NullString
+	var nickname, phone, school, jobinfo, acquaintanceName, relationship, referralName, major, GPA sql.NullString
+	var updated NullTime
 
 	for rows.Next() {
 		var nonops Candidate
@@ -171,7 +241,7 @@ func ReadDataNon(c *gin.Context) {
 			&nonops.Fpurpose, &nonops.Fcontactpersonid, &nonops.Fposition,
 			&jobinfo, &nonops.Facquaintance, &nonops.FscheduleTime,
 			&acquaintanceName, &relationship, &referralName, &nonops.Fstatus,
-			&nonops.Ftimestamp); err != nil {
+			&nonops.Ftimestamp, &updated); err != nil {
 			log.Fatal(err)
 		}
 
@@ -220,6 +290,17 @@ func ReadDataNon(c *gin.Context) {
 			strTemp, _ := temp.(string)
 			nonops.FreferralName = strTemp
 		}
+		if updated.Valid {
+			temp, _ := updated.Value()
+			strTemp, _ := temp.(time.Time)
+			nonops.FupdatedDate = strTemp
+		}
+
+		// if updated.Valid {
+		// 	temp, _ := updated.Value()
+
+		// 	// nonops.FupdatedDate = utils.GetTimestamp(temp.(time.Time))
+		// }
 		response = append(response, nonops)
 	}
 
@@ -418,7 +499,7 @@ func ReadDataOps(c *gin.Context) {
 		ELSE 'CLOSED' END)as progress, phone, school, purpose, contactpersonid,
 	positionapply, jobinfo, acquaintance, scheduletime,
 	acquaintancename, relationship, referralName, status,
-	logtimestamps FROM candidate WHERE formtype = 'Operational Form' ` + result
+	logtimestamps, updatedDate FROM candidate WHERE formtype = 'Operational Form' ` + result
 
 	rows, err := db.Query(sqlStatement)
 	if err != nil {
@@ -435,6 +516,8 @@ func ReadDataOps(c *gin.Context) {
 	var acquaintanceName sql.NullString
 	var relationship sql.NullString
 	var referralName sql.NullString
+	var updated NullTime
+
 	for rows.Next() {
 		var ops Candidate
 		if err := rows.Scan(&ops.Fid, &ops.FfullName, &nickname,
@@ -442,10 +525,15 @@ func ReadDataOps(c *gin.Context) {
 			&ops.Fcontactpersonid, &ops.Fposition, &jobinfo,
 			&ops.Facquaintance, &ops.FscheduleTime, &acquaintanceName,
 			&relationship, &referralName, &ops.Fstatus,
-			&ops.Ftimestamp); err != nil {
+			&ops.Ftimestamp, &updated); err != nil {
 			log.Fatal(err)
 		}
 
+		if updated.Valid {
+			temp, _ := updated.Value()
+			strTemp, _ := temp.(time.Time)
+			ops.FupdatedDate = strTemp
+		}
 		if nickname.Valid {
 			temp, _ := nickname.Value()
 			strTemp, _ := temp.(string)
@@ -481,6 +569,10 @@ func ReadDataOps(c *gin.Context) {
 			strTemp, _ := temp.(string)
 			ops.FreferralName = strTemp
 		}
+		// if updated.Valid {
+		// 	temp, _ := updated.Value()
+		// 	// ops.FupdatedDate = utils.GetTimestamp(temp.(time.Time))
+		// }
 
 		response = append(response, ops)
 
